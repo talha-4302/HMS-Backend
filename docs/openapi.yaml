@@ -1,0 +1,818 @@
+openapi: 3.1.1
+info:
+  title: Healthcare Management System MVP API
+  version: 0.1.0
+  summary: Starter OpenAPI contract for the HMS MVP.
+  description: |
+    This is the starter machine-readable API contract for the Healthcare Management
+    System MVP.
+
+    The full design reasoning lives in docs/mvp-api-contract.md. Expand this file
+    endpoint by endpoint as implementation phases begin.
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development server
+  - url: /api/v1
+    description: Relative API base path
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Registration, login, token refresh, and current-user identity.
+  - name: Doctors
+    description: Authenticated doctor discovery and doctor profile details.
+  - name: Appointments
+    description: Appointment booking and appointment lifecycle.
+  - name: Visits
+    description: Clinical visit lifecycle, assigned tests, and visit reports.
+  - name: Reports
+    description: Patient reports and report attachments.
+  - name: Billing
+    description: Auto-created invoices and payment capture.
+paths:
+  /auth/register:
+    post:
+      tags:
+        - Auth
+      operationId: registerPatient
+      summary: Register a patient account.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterPatientRequest'
+      responses:
+        '201':
+          description: Patient account created and authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSessionResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /auth/login:
+    post:
+      tags:
+        - Auth
+      operationId: login
+      summary: Login with email and password.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSessionResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /doctors:
+    get:
+      tags:
+        - Doctors
+      operationId: listDoctors
+      summary: List active doctors.
+      parameters:
+        - name: specialty
+          in: query
+          required: false
+          schema:
+            type: string
+          example: Cardiology
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Paginated doctor list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DoctorListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /doctors/{doctorId}:
+    get:
+      tags:
+        - Doctors
+      operationId: getDoctorById
+      summary: Get authenticated doctor profile detail.
+      parameters:
+        - $ref: '#/components/parameters/DoctorId'
+      responses:
+        '200':
+          description: Doctor profile detail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DoctorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /appointments:
+    post:
+      tags:
+        - Appointments
+      operationId: createAppointment
+      summary: Book an appointment.
+      description: Patient self-booking uses the authenticated patient profile. Staff/admin may provide patientId.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppointmentRequest'
+      responses:
+        '201':
+          description: Appointment created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /visits/{visitId}/complete:
+    post:
+      tags:
+        - Visits
+        - Billing
+      operationId: completeVisit
+      summary: Complete a visit and auto-create its invoice.
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      responses:
+        '200':
+          description: Visit completed and invoice created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitCompletionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /visit-assigned-tests/{assignedTestId}/cancel:
+    patch:
+      tags:
+        - Visits
+      operationId: cancelAssignedTest
+      summary: Cancel an assigned test as the assigned doctor.
+      parameters:
+        - $ref: '#/components/parameters/AssignedTestId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelAssignedTestRequest'
+      responses:
+        '200':
+          description: Assigned test cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssignedTestResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /patients/me/reports:
+    post:
+      tags:
+        - Reports
+      operationId: uploadExternalReport
+      summary: Upload an external report for the authenticated patient.
+      description: If linkedAssignedTestId is provided, the assigned test is completed in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExternalReportRequest'
+      responses:
+        '201':
+          description: External report created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatientReportResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    DoctorId:
+      name: doctorId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VisitId:
+      name: visitId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AssignedTestId:
+      name: assignedTestId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    ValidationError:
+      description: Request validation failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Authentication is missing or invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated actor is not allowed to perform this action.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Request conflicts with current resource state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              example: Request validation failed.
+            details:
+              type: array
+              items:
+                type: object
+              default: []
+    PaginationMeta:
+      type: object
+      required:
+        - page
+        - limit
+        - total
+        - totalPages
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        total:
+          type: integer
+          example: 1
+        totalPages:
+          type: integer
+          example: 1
+    RegisterPatientRequest:
+      type: object
+      required:
+        - email
+        - password
+        - patientProfile
+      properties:
+        email:
+          type: string
+          format: email
+          example: patient@example.com
+        password:
+          type: string
+          minLength: 8
+          example: StrongPass123!
+        patientProfile:
+          type: object
+          required:
+            - firstName
+            - lastName
+          properties:
+            firstName:
+              type: string
+              example: Test
+            lastName:
+              type: string
+              example: Patient
+            phone:
+              type: string
+              example: '+8801000000000'
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: patient@example.com
+        password:
+          type: string
+          example: StrongPass123!
+    AuthSessionResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required:
+            - accessToken
+            - refreshToken
+            - user
+          properties:
+            accessToken:
+              type: string
+              example: jwt-access-token
+            refreshToken:
+              type: string
+              example: opaque-refresh-token
+            user:
+              $ref: '#/components/schemas/User'
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - role
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          example: patient@example.com
+        role:
+          type: string
+          enum:
+            - patient
+            - doctor
+            - staff
+            - admin
+        status:
+          type: string
+          enum:
+            - active
+            - inactive
+            - flagged
+            - soft_deleted
+    Doctor:
+      type: object
+      required:
+        - id
+        - specialty
+        - isActive
+      properties:
+        id:
+          type: string
+          format: uuid
+        specialty:
+          type: string
+          example: Cardiology
+        isActive:
+          type: boolean
+          example: true
+        credentials:
+          type: object
+          additionalProperties: true
+          example:
+            degree: MBBS, FCPS
+    DoctorListResponse:
+      type: object
+      required:
+        - success
+        - data
+        - pagination
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Doctor'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+    DoctorResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/Doctor'
+    CreateAppointmentRequest:
+      type: object
+      required:
+        - doctorId
+        - startAt
+        - endAt
+      properties:
+        patientId:
+          type: string
+          format: uuid
+          description: Required only when staff/admin books for a patient.
+        doctorId:
+          type: string
+          format: uuid
+        startAt:
+          type: string
+          format: date-time
+          example: '2026-05-11T10:00:00+06:00'
+        endAt:
+          type: string
+          format: date-time
+          example: '2026-05-11T10:30:00+06:00'
+    Appointment:
+      type: object
+      required:
+        - id
+        - patientId
+        - doctorId
+        - startAt
+        - endAt
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        doctorId:
+          type: string
+          format: uuid
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum:
+            - scheduled
+            - completed
+            - cancelled
+            - no_show
+    AppointmentResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/Appointment'
+    Visit:
+      type: object
+      required:
+        - id
+        - patientId
+        - doctorId
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        doctorId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - in_progress
+            - ready_for_closure
+            - completed
+            - flagged
+        endAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    InvoiceSummary:
+      type: object
+      required:
+        - id
+        - patientId
+        - visitId
+        - status
+        - totalAmount
+        - paidAmount
+        - dueAmount
+        - items
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        visitId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - pending
+            - partial
+            - paid
+            - void
+        totalAmount:
+          type: number
+          format: double
+          example: 800
+        paidAmount:
+          type: number
+          format: double
+          example: 0
+        dueAmount:
+          type: number
+          format: double
+          example: 800
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceItem'
+    InvoiceItem:
+      type: object
+      required:
+        - id
+        - itemType
+        - description
+        - quantity
+        - unitPrice
+        - amount
+      properties:
+        id:
+          type: string
+          format: uuid
+        itemType:
+          type: string
+          enum:
+            - consultation
+            - test
+            - service
+            - other
+        referenceId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+        description:
+          type: string
+          example: Consultation fee
+        quantity:
+          type: number
+          format: double
+          example: 1
+        unitPrice:
+          type: number
+          format: double
+          example: 800
+        amount:
+          type: number
+          format: double
+          example: 800
+    VisitCompletionResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required:
+            - visit
+            - invoice
+          properties:
+            visit:
+              $ref: '#/components/schemas/Visit'
+            invoice:
+              $ref: '#/components/schemas/InvoiceSummary'
+    CancelAssignedTestRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          example: Patient no longer needs this test
+    AssignedTest:
+      type: object
+      required:
+        - id
+        - visitId
+        - testCatalogId
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        visitId:
+          type: string
+          format: uuid
+        testCatalogId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - assigned
+            - ordered_internal
+            - completed
+            - cancelled
+        instructions:
+          type:
+            - string
+            - 'null'
+    AssignedTestResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/AssignedTest'
+    CreateExternalReportRequest:
+      type: object
+      required:
+        - title
+        - attachment
+      properties:
+        title:
+          type: string
+          example: External CBC Report
+        reportDate:
+          type: string
+          format: date
+          example: '2026-05-11'
+        linkedVisitId:
+          type: string
+          format: uuid
+        linkedAssignedTestId:
+          type: string
+          format: uuid
+        attachment:
+          $ref: '#/components/schemas/ReportAttachmentInput'
+    ReportAttachmentInput:
+      type: object
+      required:
+        - fileName
+      properties:
+        fileName:
+          type: string
+          example: cbc-report.pdf
+        mimeType:
+          type: string
+          example: application/pdf
+        storageKey:
+          type: string
+          example: reports/external/example-report.pdf
+        url:
+          type: string
+          format: uri
+          example: https://example.com/reports/example-report.pdf
+    PatientReport:
+      type: object
+      required:
+        - id
+        - patientId
+        - source
+        - title
+      properties:
+        id:
+          type: string
+          format: uuid
+        patientId:
+          type: string
+          format: uuid
+        source:
+          type: string
+          enum:
+            - internal
+            - external
+        title:
+          type: string
+          example: External CBC Report
+        linkedAssignedTestId:
+          type:
+            - string
+            - 'null'
+          format: uuid
+    PatientReportResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/PatientReport'
