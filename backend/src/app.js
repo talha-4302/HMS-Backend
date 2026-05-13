@@ -2,6 +2,9 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 
+import { errorHandler } from './shared/middleware/errorHandler.js';
+import { notFoundHandler } from './shared/middleware/notFoundHandler.js';
+
 dotenv.config();
 
 export const app = express();
@@ -15,3 +18,6 @@ app.get('/health', (req, res) => {
     service: 'hms-backend',
   });
 });
+
+app.use(notFoundHandler);
+app.use(errorHandler);

@@ -15,11 +15,8 @@ Phase 3 creates the shared API foundation:
 
 1. Standard application errors.
 2. Standard error response formatting.
-3. Async controller error forwarding.
-4. Request validation formatting.
-5. Not-found handling.
-6. Optional success response helper.
-7. Role authorization helper that depends on `req.user`, without implementing JWT verification yet.
+3. Request validation formatting.
+4. Not-found handling.
 
 This phase should answer:
 
@@ -49,9 +46,10 @@ This phase plan uses the current root directly. If older phase plans still conta
 | Health route | Keep `GET /health` app-only |
 | Request validation library | `express-validator` |
 | Error response shape | Standard envelope with `success: false` |
-| Success response shape | Standard envelope with `success: true` |
+| Success response helper | Deferred until controllers need it |
 | Auth implementation | Not in Phase 3 |
 | JWT verification | Phase 4 |
+| Role authorization helper | Deferred until auth middleware creates `req.user` |
 | Database access | Not required for Phase 3 |
 | OpenAPI UI | Not served by Express |
 
@@ -71,6 +69,9 @@ Do **not** implement these in Phase 3:
 - Domain controllers.
 - Database queries.
 - Seed data.
+- `asyncHandler`.
+- `sendSuccess`.
+- `authorizeRole`.
 - Swagger UI, `/api-docs`, or runtime OpenAPI serving.
 
 Phase 3 creates shared API behavior only.
@@ -154,38 +155,7 @@ Production logic:
 
 ---
 
-### 3. Async Handler
-
-#### [NEW] `backend/src/shared/utils/asyncHandler.js`
-
-Purpose:
-
-Forward rejected promises from async controllers/middleware into Express error handling.
-
-Why this file exists:
-
-- Controllers should not repeat `try/catch` around every service call.
-- Error flow stays consistent.
-
-Expected implementation shape:
-
-```js
-export function asyncHandler(handler) {
-  return function wrappedHandler(req, res, next) {
-    Promise.resolve(handler(req, res, next)).catch(next);
-  };
-}
-```
-
-Usage in later phases:
-
-```js
-router.post('/auth/login', asyncHandler(authController.login));
-```
-
----
-
-### 4. Request Validation Middleware
+### 3. Request Validation Middleware
 
 #### [NEW] `backend/src/shared/middleware/validateRequest.js`
 
@@ -232,45 +202,7 @@ router.post(
 
 ---
 
-### 5. Authorization Role Helper
-
-#### [NEW] `backend/src/shared/middleware/authorizeRole.js`
-
-Purpose:
-
-Provide role checking for future protected routes after authentication has attached `req.user`.
-
-Why this file exists:
-
-- Route-level role checks should be reusable.
-- Role checks should not be duplicated in controllers.
-
-Important Phase 3 boundary:
-
-This middleware does **not** verify JWTs. It only checks `req.user.role` if an earlier authentication middleware has already attached `req.user`.
-
-Expected behavior:
-
-- If `req.user` is missing, return `UNAUTHORIZED`.
-- If `req.user.role` is not allowed, return `FORBIDDEN`.
-- Otherwise call `next()`.
-
-Expected usage in Phase 4+:
-
-```js
-router.get(
-  '/users',
-  authenticate,
-  authorizeRole('admin'),
-  asyncHandler(usersController.listUsers),
-);
-```
-
-Do not create `authenticate.js` in Phase 3 unless we intentionally make it a throwing placeholder. Real authentication belongs in Phase 4.
-
----
-
-### 6. Not Found Handler
+### 4. Not Found Handler
 
 #### [NEW] `backend/src/shared/middleware/notFoundHandler.js`
 
@@ -301,7 +233,7 @@ Register this after all real routes and before the global error handler.
 
 ---
 
-### 7. Global Error Handler
+### 5. Global Error Handler
 
 #### [NEW] `backend/src/shared/middleware/errorHandler.js`
 
@@ -353,39 +285,7 @@ The error handler must be registered last in `app.js`.
 
 ---
 
-### 8. Success Response Helper
-
-#### [NEW] `backend/src/shared/utils/sendSuccess.js`
-
-Purpose:
-
-Provide a small helper for the standard success envelope.
-
-Why this file exists:
-
-- Keeps response shape consistent.
-- Avoids each controller manually repeating envelope structure.
-
-Expected shape:
-
-```js
-export function sendSuccess(res, { statusCode = 200, data, message, pagination } = {}) {
-  return res.status(statusCode).json({
-    success: true,
-    ...(data !== undefined && { data }),
-    ...(message && { message }),
-    ...(pagination && { pagination }),
-  });
-}
-```
-
-Tradeoff:
-
-This helper is useful if controllers stay consistent. If it starts hiding too much behavior, later phases can keep direct `res.status(...).json(...)` for simple cases.
-
----
-
-### 9. Express App Wiring
+### 6. Express App Wiring
 
 #### [MODIFY] `backend/src/app.js`
 
@@ -420,10 +320,7 @@ No domain routes should be mounted in Phase 3.
 |---|---|---:|---|
 | `backend/src/shared/errors/errorCodes.js` | New | Light | shared machine-readable codes |
 | `backend/src/shared/errors/AppError.js` | New | Light | expected application failure type |
-| `backend/src/shared/utils/asyncHandler.js` | New | Light | async error forwarding |
-| `backend/src/shared/utils/sendSuccess.js` | New | Light | standard success envelope helper |
 | `backend/src/shared/middleware/validateRequest.js` | New | Light | express-validator error formatting |
-| `backend/src/shared/middleware/authorizeRole.js` | New | Light | role check against `req.user` only |
 | `backend/src/shared/middleware/notFoundHandler.js` | New | Light | consistent 404 response |
 | `backend/src/shared/middleware/errorHandler.js` | New | Medium | standard error envelope |
 | `backend/src/app.js` | Modify | Light | mount 404 and error middleware |
@@ -459,9 +356,8 @@ HTTP request
   -> route
   -> validators
   -> validateRequest
-  -> asyncHandler(controller)
   -> controller calls service
-  -> sendSuccess response
+  -> standard success response
 ```
 
 ### Validation Failure Flow
@@ -477,7 +373,7 @@ HTTP request
 
 ```text
 service throws AppError
-  -> asyncHandler catches rejected promise
+  -> Express receives the error
   -> errorHandler formats expected error response
 ```
 
@@ -523,17 +419,17 @@ Field detail mapping should prefer:
 
 Phase 3 does not implement authentication.
 
-It may implement `authorizeRole`, but that middleware only works after `req.user` exists.
+Role authorization is deferred until Phase 4 or the first protected module needs it.
 
 Rule:
 
 ```text
 authenticate attaches req.user in Phase 4
-authorizeRole checks req.user.role in Phase 3/4+
+authorizeRole checks req.user.role after authentication exists
 policies check resource ownership in later domain phases
 ```
 
-Do not use `authorizeRole` alone on real protected routes before authentication exists.
+Do not add role middleware before authentication exists.
 
 ---
 
@@ -582,10 +478,7 @@ Run from `backend`:
 node --check src/app.js
 node --check src/shared/errors/AppError.js
 node --check src/shared/errors/errorCodes.js
-node --check src/shared/utils/asyncHandler.js
-node --check src/shared/utils/sendSuccess.js
 node --check src/shared/middleware/validateRequest.js
-node --check src/shared/middleware/authorizeRole.js
 node --check src/shared/middleware/notFoundHandler.js
 node --check src/shared/middleware/errorHandler.js
 ```
@@ -638,7 +531,6 @@ Security:
 
 Reliability:
 
-- Every future async controller should use `asyncHandler`.
 - Every expected service failure should use `AppError`.
 - Validation failures should never reach service logic.
 
@@ -663,11 +555,11 @@ Keep helpers small and only cover repeated cross-cutting behavior.
 
 Risk:
 
-Creating authentication placeholder middleware can give a false sense of security.
+Adding auth or role middleware before JWT exists can give a false sense of security.
 
 Mitigation:
 
-Do not implement fake `authenticate` behavior. Phase 4 owns real JWT verification.
+Do not implement fake `authenticate` or `authorizeRole` behavior. Phase 4 owns real JWT verification and protected route behavior.
 
 Risk:
 
@@ -685,7 +577,6 @@ Phase 3 learning topics:
 
 - Express middleware order.
 - Express error middleware signature.
-- Async error forwarding.
 - Operational vs programming errors.
 - Standard API response envelopes.
 - `express-validator` result formatting.
@@ -700,15 +591,12 @@ Phase 3 is complete when:
 
 - `AppError` exists.
 - Shared error codes exist.
-- `asyncHandler` exists.
 - `validateRequest` exists.
-- `authorizeRole` exists and only checks existing `req.user`.
 - `notFoundHandler` exists.
 - `errorHandler` exists.
-- Optional `sendSuccess` helper exists.
 - `app.js` mounts `notFoundHandler` and `errorHandler` in the correct order.
 - Unknown routes return standard JSON `404`.
 - Unexpected errors return safe JSON `500`.
 - Validation errors can be formatted into the standard error envelope.
 - `/health` still works without database or auth env values.
-- No auth endpoints, JWT logic, password hashing, repositories, services, domain routes, or seed data are added.
+- No auth endpoints, JWT logic, password hashing, role middleware, success helper, async helper, repositories, services, domain routes, or seed data are added.
