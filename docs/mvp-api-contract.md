@@ -2397,6 +2397,10 @@ Use database transactions for:
 
 These operations update related records. Partial completion would create inconsistent data.
 
+### Implementation rule
+
+Use the shared `withTransaction` helper from `db/transaction.js` for multi-query workflows. Repository methods should accept a `db` argument so the service can pass either the normal pool or the transaction client.
+
 ### Alternative considered
 
 Run independent queries without transaction.
@@ -2405,18 +2409,12 @@ Simpler but unsafe when one write succeeds and another fails.
 
 ---
 
-## 11.4 OpenAPI and Swagger
+## 11.4 OpenAPI Contract
 
 The machine-readable API contract lives in:
 
 ```text
 docs/openapi.yaml
-```
-
-Swagger UI will later serve this contract from the Express app at:
-
-```http
-GET /api-docs
 ```
 
 ### Contract Rules
@@ -2432,11 +2430,11 @@ GET /api-docs
 
 ### Why this design?
 
-Swagger UI gives us interactive API documentation, but the deeper value is OpenAPI as a reviewable contract. It lets us check request bodies, response shapes, auth rules, and examples before controllers exist.
+The value of OpenAPI in this project is a reviewable contract. It lets us check request bodies, response shapes, auth rules, and examples before controllers exist.
 
 ### Alternative considered
 
-Generate docs from Express route comments with `swagger-jsdoc`.
+Generate docs from Express route comments.
 
 Useful later, but rejected for MVP planning because our contract should lead implementation. Route comments can easily drift into scattered mini-contracts before the design is stable.
 
@@ -2476,6 +2474,13 @@ These design questions are now resolved for MVP implementation:
 | 7 | Invoices are auto-created after visit completion. | Avoids completed visits without invoices and removes a repetitive manual staff step. |
 | 8 | Admin behavior uses normal resources with admin authorization. | Avoids duplicate `/admin/*` controllers while preserving admin-only permissions. |
 
-### Deferred Tooling Decisions
+### Finalized Phase 0 Tooling Decisions
 
-Validation library and migration tooling remain intentionally unresolved in `docs/guidance.md`. We should compare options before implementing those parts because they affect request modeling, database workflow, testing ergonomics, and long-term maintainability.
+Phase 0 finalized the setup choices that affect API implementation:
+
+- Request validation uses `express-validator`.
+- Validation chains should live in module-level `*.validators.js` files.
+- A shared `validateRequest` middleware should format validation errors consistently.
+- Schema changes use manual SQL migration files for MVP.
+- Automated tests are introduced after the first module slice is built, using `jest`, `supertest`, and a separate `TEST_DATABASE_URL` for integration tests.
+- Real database credentials belong only in local `.env`, never in committed docs, source, tests, or examples.

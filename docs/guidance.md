@@ -29,30 +29,45 @@ We will use:
 
 Current supporting tool decisions for MVP are:
 
-- Validation library: decision deferred; compare options before request validation implementation.
+- Validation library: `express-validator`.
 - Authentication/JWT library: `jsonwebtoken`.
 - Password hashing library: `bcrypt`.
-- Database query layer/ORM: Prisma ORM.
-- Migration tool: decision deferred; revisit Prisma Migrate when schema changes begin.
-- Test framework: `jest` + `supertest`.
+- Database query layer: raw SQL with `pg`.
+- Query organization: repository pattern.
+- Migration strategy: manual SQL migration files, SQL-first, without a migration runner for MVP.
+- Test strategy: start with manual verification for Phase 0 and early bootstrap, then introduce `jest` + `supertest` after the first module slice is built.
 - Environment configuration library: `dotenv`.
 - UUID generation: native `crypto.randomUUID()`.
 - CORS: `cors`.
 - API documentation/spec: OpenAPI 3.1.1.
-- Interactive API docs: Swagger UI served with `swagger-ui-express` at `/api-docs`.
 - OpenAPI source: `docs/openapi.yaml`, maintained contract-first from `docs/mvp-api-contract.md`.
+- Runtime API docs UI: not included.
 
-Validation and migration tooling are intentionally still open because they affect developer experience and long-term maintainability. OpenAPI generation from validation schemas is also deferred until we choose the validation library. Before coding those parts, we should compare options, tradeoffs, and how much complexity is appropriate for the MVP.
+Phase 0 finalized these choices so Phase 1 can install the right packages and avoid tool churn. We are choosing `express-validator` because it is simple in Express routes and approachable while learning backend validation. The tradeoff is that validators can become scattered, so every module should keep validation chains in dedicated `*.validators.js` files and expose them through a shared `validateRequest` middleware.
+
+Manual SQL migrations are chosen because this project intentionally uses raw SQL and should teach schema changes directly. The tradeoff is discipline: migration files must be ordered, reviewable, and applied consistently. We can add a migration runner later if manual execution becomes error-prone.
+
+OpenAPI generation from validation schemas remains deferred. For now, `docs/openapi.yaml` is hand-authored and contract-first.
+
+Environment rule:
+
+- `backend/.env` holds local backend secrets and is ignored by Git.
+- Root `.env.example` is committed with placeholders only.
+- Real Neon database URLs must not be committed in docs, examples, tests, or source code.
 
 ---
 
-## 3. Immediate Next Step
+## 3. Current Planning Documents
 
-The next document should be:
+The main planning documents are:
 
-`docs/mvp-api-contract.md`
+- `docs/mvp-api-contract.md`
+- `docs/backend-architecture.md`
+- `docs/implementation-plan.md`
+- `docs/openapi-guidance.md`
+- `docs/openapi.yaml`
 
-This document should convert the MVP feature breakdown into exact backend contracts.
+`docs/mvp-api-contract.md` converts the MVP feature breakdown into exact backend contracts.
 
 For each endpoint, define:
 
@@ -125,6 +140,14 @@ If a feature is not required for the core patient-doctor-lab-billing flow, it sh
 
 The Express backend should be structured with clear separation of concerns.
 
+Current architecture decision:
+
+- JavaScript, not TypeScript for MVP.
+- ES modules because `backend/package.json` uses `"type": "module"`.
+- Raw SQL through `pg`, not an ORM.
+- Repository pattern to keep SQL out of controllers and services.
+- Shared transaction helper for workflows that update multiple tables.
+
 Recommended layers:
 
 | Layer | Responsibility |
@@ -162,86 +185,109 @@ This keeps the project easier to test and maintain.
 
 ---
 
-## 6. Suggested Node/Express Folder Structure
+## 6. Finalized Node/Express Folder Structure
 
-Possible structure:
+Initial structure:
 
 ```text
-src/
-  app.js
-  server.js
+backend/
+  package.json
+  src/
+    app.js
+    server.js
 
-  config/
-    env.js
-    db.js
+    db/
+      pool.js
+      transaction.js
 
-  modules/
-    auth/
-      auth.routes.js
-      auth.controller.js
-      auth.service.js
-      auth.validators.js
+    shared/
+      constants/
+      errors/
+        AppError.js
+        errorCodes.js
+      middleware/
+        authenticate.js
+        authorizeRole.js
+        errorHandler.js
+        validateRequest.js
+      utils/
+        asyncHandler.js
+        password.js
+        token.js
 
-    users/
-      users.routes.js
-      users.controller.js
-      users.service.js
-      users.repository.js
-      users.validators.js
+    modules/
+      auth/
+        auth.routes.js
+        auth.controller.js
+        auth.service.js
+        auth.repository.js
+        auth.validators.js
 
-    patients/
-    doctors/
-    appointments/
-    visits/
-    labs/
-    reports/
-    billing/
+      users/
+        users.routes.js
+        users.controller.js
+        users.service.js
+        users.repository.js
+        users.validators.js
 
-  middlewares/
-    authenticate.js
-    authorizeRole.js
-    errorHandler.js
-    validateRequest.js
+      patients/
+      doctors/
+      appointments/
+      visits/
+      lab/
+      reports/
+      billing/
 
-  policies/
-    patientAccessPolicy.js
-    doctorAccessPolicy.js
-
-  shared/
-    errors/
-    utils/
-    constants/
+    policies/
+      patientAccessPolicy.js
+      doctorAccessPolicy.js
 ```
 
-We should finalize structure after deciding the database access strategy.
+Rules:
+
+- Routes define paths and attach middleware/controllers.
+- Controllers read HTTP input and return HTTP output.
+- Services own business workflows and transaction boundaries.
+- Repositories own SQL only.
+- Policies answer authorization/ownership questions that are more specific than simple role checks.
+- `db/pool.js` owns PostgreSQL connection pooling.
+- `db/transaction.js` owns reusable `BEGIN` / `COMMIT` / `ROLLBACK` behavior.
 
 ---
 
 ## 7. Phase 1 Implementation Plan
 
-Phase 1 should build the foundation:
+Phase 1 should build the runnable backend bootstrap only:
 
-- Project setup
-- Environment configuration
-- Database connection
-- Shared error response model
-- Request validation pattern
-- Auth module
-- User module
-- Patient profile
-- Doctor profile
-- Staff profile
-- Role guard
+- Project metadata under `backend`
+- Express app/server separation
+- direct `dotenv` loading from `backend/.env`
+- Initial folder structure
+- `GET /health`
 
 Why this comes first:
 
-Every other module depends on authenticated identity, role access, and profile records.
+Every later phase depends on a predictable app skeleton and startup path.
+
+Phase 1 should not implement database connection, shared error/validation middleware, auth, users, profiles, repositories, or role guards. Those belong to later phases.
+
+## 7.1 Phase 2 Implementation Plan
+
+Phase 2 should build the database foundation:
+
+- `pg` pool
+- transaction helper
+- first manual schema migration
+- database connectivity check
+- migration instructions using `MIGRATION_DATABASE_URL`
+
+Phase 2 should not implement domain repositories or seed data.
 
 ---
 
 ## 8. Testing Strategy
 
-Testing should start from Phase 1.
+Manual smoke checks should start from Phase 1. Automated tests should start after the first real module slice exists, unless we explicitly revise the Phase 0 testing decision.
 
 For each module, we should include:
 
@@ -281,16 +327,17 @@ Good session size:
 
 Example sessions:
 
-1. Project structure and shared middleware
-2. Database connection and migration setup
-3. Auth register/login
-4. JWT middleware and role guard
-5. Patient profile APIs
-6. Doctor profile APIs
-7. Appointment booking conflict checks
-8. Visit creation and visit report
-9. Assigned tests and lab orders
-10. Billing and payment tracking
+1. Project bootstrap and health route
+2. Database connection, transaction helper, and migration setup
+3. Shared API foundation and validation middleware
+4. Auth register/login
+5. JWT middleware and role guard
+6. Patient profile APIs
+7. Doctor profile APIs
+8. Appointment booking conflict checks
+9. Visit creation and visit report
+10. Assigned tests and lab orders
+11. Billing and payment tracking
 
 Before each edit session, we should confirm the scope and expected output.
 
@@ -335,23 +382,9 @@ This thinking keeps the code production-minded instead of endpoint-driven only.
 
 ## 12. Recommended Next Action
 
-Create:
+Use the detailed phase plans to implement:
 
-`docs/mvp-api-contract.md`
+- `docs/phase-plans/phase-01-project-bootstrap.md`
+- `docs/phase-plans/phase-02-database-foundation.md`
 
-Start with Phase 1 APIs:
-
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/logout`
-- `GET /auth/me`
-- `GET /patients/me`
-- `PATCH /patients/me`
-- `GET /doctors`
-- `GET /doctors/{doctorId}`
-- `PATCH /doctors/me`
-- `POST /users`
-- `PATCH /users/{userId}/status`
-
-Once Phase 1 API contracts are clear, we can design the Node/Express architecture and start implementation safely.
+Phase 1 should stay limited to runnable app bootstrap. Phase 2 should stay limited to database infrastructure and the initial manual migration.
